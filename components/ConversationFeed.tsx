@@ -167,7 +167,8 @@ export default function ConversationFeed() {
                 >
                   <p className="text-sm">{message.message}</p>
                   <p className="text-xs mt-1 opacity-60">
-                    {new Date(message.created_at).toLocaleTimeString([], {
+                    {new Date(message.created_at).toLocaleTimeString('en-US', {
+                      timeZone: 'America/New_York',
                       hour: '2-digit',
                       minute: '2-digit',
                     })}

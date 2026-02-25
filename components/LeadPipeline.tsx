@@ -35,9 +35,9 @@ export default function LeadPipeline({ leads }: LeadPipelineProps) {
   }, [leads]);
 
   function formatTimeSince(dateString: string): string {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
+    const dateMs = Date.parse(dateString);
+    const nowMs = Date.now();
+    const diffMs = nowMs - dateMs;
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);

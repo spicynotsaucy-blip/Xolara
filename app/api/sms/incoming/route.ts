@@ -59,6 +59,68 @@ async function getAIResponse(conversationHistory: Array<{ role: string; message:
   return completion.choices[0]?.message?.content || 'I apologize, I had trouble processing that. Could you repeat?';
 }
 
+type Qualification = {
+  timeline: string | null;
+  budget: string | null;
+  area: string | null;
+};
+
+function normalizeQualification(q: Qualification): Qualification {
+  const normalize = (v: unknown) => {
+    if (typeof v !== 'string') return null;
+    const trimmed = v.trim();
+    if (!trimmed) return null;
+    if (trimmed.toLowerCase() === 'null') return null;
+    if (trimmed.toLowerCase() === 'unknown') return null;
+    if (trimmed.toLowerCase() === 'n/a') return null;
+    return trimmed;
+  };
+
+  return {
+    timeline: normalize(q.timeline),
+    budget: normalize(q.budget),
+    area: normalize(q.area),
+  };
+}
+
+async function extractQualification(conversationHistory: Array<{ role: string; message: string }>): Promise<Qualification> {
+  const messages = formatConversationForGroq(conversationHistory);
+
+  messages.push({
+    role: 'user',
+    content:
+      'From the conversation so far, extract the lead\'s qualification info. Return ONLY valid JSON with keys: timeline, budget, area. Use null when unknown. Keep values short and literal. Example: {"timeline":"next 30 days","budget":"$500k","area":"Austin"}.',
+  } as any);
+
+  const completion = await groq.chat.completions.create({
+    messages: messages as any,
+    model: 'llama-3.3-70b-versatile',
+    temperature: 0,
+    max_tokens: 120,
+  });
+
+  const raw = completion.choices[0]?.message?.content || '';
+  try {
+    const parsed = JSON.parse(raw);
+    return normalizeQualification({
+      timeline: parsed?.timeline ?? null,
+      budget: parsed?.budget ?? null,
+      area: parsed?.area ?? null,
+    });
+  } catch {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      return normalizeQualification({
+        timeline: parsed?.timeline ?? null,
+        budget: parsed?.budget ?? null,
+        area: parsed?.area ?? null,
+      });
+    }
+    return { timeline: null, budget: null, area: null };
+  }
+}
+
 /**
  * Send SMS via Telnyx
  */
@@ -159,13 +221,25 @@ export async function POST(request: NextRequest) {
     // Save the AI response
     await saveMessage(phoneNumber, 'ai', aiResponse);
 
+    const qualification = await extractQualification([...fullHistory, { role: 'ai', message: aiResponse }]);
+    const leadUpdates: Record<string, string | null> = {
+      budget: lead.budget ?? qualification.budget,
+      timeline: lead.timeline ?? qualification.timeline,
+      area: lead.area ?? qualification.area,
+    };
+
+    const hasAllQualification = Boolean(leadUpdates.timeline && leadUpdates.budget && leadUpdates.area);
+    const isAppointed = hasAppointmentBooked(aiResponse);
+    const nextStatus = isAppointed
+      ? 'appointed'
+      : hasAllQualification
+        ? 'qualified'
+        : lead.status === 'new'
+          ? 'engaged'
+          : lead.status;
+
     // Check if appointment was booked and update status
-    if (hasAppointmentBooked(aiResponse)) {
-      await updateLeadStatus(phoneNumber, 'appointed');
-    } else if (lead.status === 'new') {
-      // Update to engaged if this is the first interaction
-      await updateLeadStatus(phoneNumber, 'engaged');
-    }
+    await updateLeadStatus(phoneNumber, nextStatus as any, leadUpdates as any);
 
     // Send the AI response back via Twilio SMS
     await sendSMS(phoneNumber, aiResponse, inbound.to);
