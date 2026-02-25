@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Twilio } from 'twilio';
 import Groq from 'groq-sdk';
-import { getOrCreateLead, getConversationHistory, saveMessage, updateLeadStatus, hasAppointmentBooked } from '@/lib/db';
-import { supabase } from '@/lib/supabase';
-
-// Initialize Twilio client
-const twilioClient = new Twilio(
-  process.env.TWILIO_ACCOUNT_SID!,
-  process.env.TWILIO_AUTH_TOKEN!
-);
+import {
+  getOrCreateLead,
+  getConversationHistory,
+  saveMessage,
+  updateLeadStatus,
+  hasAppointmentBooked,
+} from '@/lib/db';
 
 // Initialize Groq client
 const groq = new Groq({
@@ -62,36 +60,71 @@ async function getAIResponse(conversationHistory: Array<{ role: string; message:
 }
 
 /**
- * Send SMS via Twilio
+ * Send SMS via Telnyx
  */
-async function sendSMS(to: string, body: string) {
-  await twilioClient.messages.create({
-    body,
-    from: process.env.TWILIO_PHONE_NUMBER!,
-    to,
+async function sendSMS(to: string, text: string, from?: string) {
+  const apiKey = process.env.TELNYX_API_KEY;
+  if (!apiKey) throw new Error('Missing TELNYX_API_KEY');
+
+  const fromNumber = from || process.env.TELNYX_FROM_NUMBER;
+  if (!fromNumber) throw new Error('Missing TELNYX_FROM_NUMBER');
+
+  const res = await fetch('https://api.telnyx.com/v2/messages', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: fromNumber,
+      to,
+      text,
+    }),
   });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Telnyx send failed: ${res.status} ${res.statusText} ${body}`);
+  }
 }
 
-/**
- * Generate TwiML response for Twilio
- */
-function generateTwiMLResponse(message: string) {
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Message>${escapeXml(message)}</Message>
-</Response>`;
-}
+type InboundSms = {
+  from: string;
+  to?: string;
+  body: string;
+  provider: 'telnyx' | 'twilio';
+};
 
-/**
- * Escape XML special characters
- */
-function escapeXml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+async function parseInboundSms(request: NextRequest): Promise<InboundSms> {
+  const contentType = request.headers.get('content-type') || '';
+
+  // Telnyx inbound message webhook is JSON.
+  if (contentType.includes('application/json')) {
+    const json: any = await request.json();
+    const payload = json?.data?.payload;
+
+    const from = payload?.from?.phone_number as string | undefined;
+    const to = (payload?.to?.[0]?.phone_number as string | undefined) || (payload?.to?.phone_number as string | undefined);
+    const body = payload?.text as string | undefined;
+
+    if (!from || !body) {
+      throw new Error('Invalid Telnyx payload: missing from/text');
+    }
+
+    return { from, to, body, provider: 'telnyx' };
+  }
+
+  // Twilio sends x-www-form-urlencoded which Next parses as formData.
+  const formData = await request.formData();
+  const from = (formData.get('From') as string | null)?.trim();
+  const body = (formData.get('Body') as string | null)?.trim();
+  const to = (formData.get('To') as string | null)?.trim() || undefined;
+
+  if (!from || !body) {
+    throw new Error('Invalid Twilio payload: missing From/Body');
+  }
+
+  return { from, to, body, provider: 'twilio' };
 }
 
 /**
@@ -99,21 +132,11 @@ function escapeXml(text: string): string {
  */
 export async function POST(request: NextRequest) {
   try {
-    // Parse the form data from Twilio
-    const formData = await request.formData();
-    const from = formData.get('From') as string;
-    const body = formData.get('Body') as string;
-
-    if (!from || !body) {
-      return NextResponse.json(
-        { error: 'Missing required fields: From and Body' },
-        { status: 400 }
-      );
-    }
+    const inbound = await parseInboundSms(request);
 
     // Normalize phone number
-    const phoneNumber = from.trim();
-    const messageBody = body.trim();
+    const phoneNumber = inbound.from.trim();
+    const messageBody = inbound.body.trim();
 
     // Get or create the lead
     const lead = await getOrCreateLead(phoneNumber);
@@ -145,27 +168,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Send the AI response back via Twilio SMS
-    await sendSMS(phoneNumber, aiResponse);
+    await sendSMS(phoneNumber, aiResponse, inbound.to);
 
-    // Return TwiML response
-    const twiml = generateTwiMLResponse(aiResponse);
-
-    return new NextResponse(twiml, {
-      headers: {
-        'Content-Type': 'text/xml',
-      },
-    });
+    // Telnyx expects a fast 2xx response; no TwiML.
+    return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('Error in SMS webhook:', error);
-    
-    // Return error TwiML
-    const errorTwiml = generateTwiMLResponse('I apologize, I had trouble processing your message. Please try again.');
-    
-    return new NextResponse(errorTwiml, {
-      headers: {
-        'Content-Type': 'text/xml',
-      },
-      status: 200, // Return 200 so Twilio doesn't retry
-    });
+
+    // Always return 200 to prevent provider retries from spamming.
+    return NextResponse.json({ ok: false }, { status: 200 });
   }
 }

@@ -6,7 +6,7 @@ Xolara is an AI-powered Inside Sales Agent (ISA) platform for real estate agents
 
 - **AI SMS Engine**: Powered by Groq's llama-3.3-70b-versatile model
 - **Real-time Dashboard**: Live conversation feed and lead pipeline
-- **Twilio Integration**: Send and receive SMS messages
+- **Telnyx Integration**: Send and receive SMS messages
 - **Supabase Backend**: Real-time database with live subscriptions
 - **Beautiful UI**: Dark theme with glass-morphism design and Framer Motion animations
 
@@ -14,14 +14,14 @@ Xolara is an AI-powered Inside Sales Agent (ISA) platform for real estate agents
 
 - **Framework**: Next.js 14 (App Router)
 - **Database & Auth**: Supabase
-- **SMS**: Twilio
+- **SMS**: Telnyx
 - **AI**: Groq API (llama-3.3-70b-versatile)
 - **Styling**: Tailwind CSS + Framer Motion
 
 ## Prerequisites
 
 - Node.js 18+ 
-- A Twilio account with a phone number
+- A Telnyx account with an SMS-enabled phone number
 - A Supabase account
 - A Groq API key
 
@@ -44,10 +44,9 @@ cp .env.local.example .env.local
 Fill in the following values:
 
 ```env
-# Twilio Configuration
-TWILIO_ACCOUNT_SID=your_twilio_account_sid_here
-TWILIO_AUTH_TOKEN=your_twilio_auth_token_here
-TWILIO_PHONE_NUMBER=your_twilio_phone_number_here
+# Telnyx Configuration
+TELNYX_API_KEY=your_telnyx_api_key_here
+TELNYX_FROM_NUMBER=your_telnyx_phone_number_here
 
 # Groq API Key
 GROQ_API_KEY=your_groq_api_key_here
@@ -94,21 +93,15 @@ ALTER PUBLICATION supabase_realtime ADD TABLE leads;
 ALTER PUBLICATION supabase_realtime ADD TABLE conversations;
 ```
 
-### 4. Configure Twilio Webhook
+### 4. Configure Telnyx Webhook
 
-1. In your Twilio Console, go to Phone Numbers → Manage → Active Numbers
-2. Click on your phone number
-3. Under "Messaging", set the webhook URL for "A message comes in":
+1. In your Telnyx Portal, go to **Messaging** → **Messaging Profiles**
+2. Select your Messaging Profile (or create one)
+3. Set the **Inbound Webhook URL** to:
    ```
    https://your-domain.com/api/sms/incoming
    ```
-   For local development, use ngrok to expose your localhost:
-   ```bash
-   npx ngrok http 3000
-   ```
-   Then use the ngrok URL + `/api/sms/incoming`
-
-4. Set HTTP Method to POST
+4. Ensure the webhook method is **POST** and the webhook format is **JSON**
 
 ### 5. Run the Development Server
 
@@ -125,7 +118,7 @@ Navigate to [http://localhost:3000/dashboard](http://localhost:3000/dashboard) t
 ```
 xolara/
 ├── app/
-│   ├── api/sms/incoming/     # Twilio webhook handler
+│   ├── api/sms/incoming/     # Telnyx webhook handler
 │   ├── dashboard/            # Dashboard page
 │   ├── globals.css           # Global styles
 │   ├── layout.tsx            # Root layout
@@ -146,11 +139,11 @@ xolara/
 
 ## How It Works
 
-1. **Lead sends SMS** to your Twilio number
-2. **Twilio webhook** sends the message to `/api/sms/incoming`
+1. **Lead sends SMS** to your Telnyx number
+2. **Telnyx webhook** sends the message to `/api/sms/incoming`
 3. **API route** fetches conversation history from Supabase
 4. **Groq AI** generates a response based on the conversation history and system prompt
-5. **Response is sent** back to the lead via Twilio SMS
+5. **Response is sent** back to the lead via Telnyx SMS
 6. **Dashboard updates** in real-time via Supabase subscriptions
 7. When `[APPOINTMENT_BOOKED]` is detected in AI response, the lead status is automatically updated to 'appointed'
 
@@ -166,17 +159,16 @@ The AI (named Alex) follows this exact sequence:
 
 ## Testing
 
-To test the SMS flow locally:
-1. Start ngrok: `npx ngrok http 3000`
-2. Update Twilio webhook URL with your ngrok URL
-3. Send a text message to your Twilio number
-4. Watch the conversation appear in the dashboard in real-time
+To test the SMS flow:
+1. Deploy to Vercel (recommended) and set your Telnyx webhook to your Vercel URL
+2. Send a text message to your Telnyx number
+3. Watch the conversation appear in the dashboard in real-time
 
 ## Production Deployment
 
 For production deployment:
 1. Deploy to Vercel, Netlify, or your preferred platform
-2. Update Twilio webhook URL to your production domain
+2. Update Telnyx webhook URL to your production domain
 3. Ensure all environment variables are set in your hosting platform
 4. The Supabase real-time subscriptions will work automatically
 
