@@ -160,33 +160,45 @@ type InboundSms = {
 async function parseInboundSms(request: NextRequest): Promise<InboundSms> {
   const contentType = request.headers.get('content-type') || '';
 
-  // Telnyx inbound message webhook is JSON.
-  if (contentType.includes('application/json')) {
-    const json: any = await request.json();
-    const payload = json?.data?.payload;
+  const isJson = contentType.includes('application/json');
+  const isFormUrlEncoded = contentType.includes('application/x-www-form-urlencoded');
+  const isMultipart = contentType.includes('multipart/form-data');
 
-    const from = payload?.from?.phone_number as string | undefined;
-    const to = (payload?.to?.[0]?.phone_number as string | undefined) || (payload?.to?.phone_number as string | undefined);
-    const body = payload?.text as string | undefined;
+  // Twilio sends x-www-form-urlencoded (or sometimes multipart/form-data)
+  if (isFormUrlEncoded || isMultipart) {
+    const formData = await request.formData();
+    const from = (formData.get('From') as string | null)?.trim();
+    const body = (formData.get('Body') as string | null)?.trim();
+    const to = (formData.get('To') as string | null)?.trim() || undefined;
 
     if (!from || !body) {
-      throw new Error('Invalid Telnyx payload: missing from/text');
+      throw new Error('Invalid Twilio payload: missing From/Body');
     }
 
-    return { from, to, body, provider: 'telnyx' };
+    return { from, to, body, provider: 'twilio' };
   }
 
-  // Twilio sends x-www-form-urlencoded which Next parses as formData.
-  const formData = await request.formData();
-  const from = (formData.get('From') as string | null)?.trim();
-  const body = (formData.get('Body') as string | null)?.trim();
-  const to = (formData.get('To') as string | null)?.trim() || undefined;
+  // Telnyx inbound message webhook is JSON. Some providers may omit content-type,
+  // so attempt JSON parse for any non-form content-type.
+  const text = isJson ? undefined : await request.text();
+  const json: any = isJson ? await request.json() : (() => {
+    try {
+      return text ? JSON.parse(text) : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const payload = json?.data?.payload;
+  const from = payload?.from?.phone_number as string | undefined;
+  const to = (payload?.to?.[0]?.phone_number as string | undefined) || (payload?.to?.phone_number as string | undefined);
+  const body = payload?.text as string | undefined;
 
   if (!from || !body) {
-    throw new Error('Invalid Twilio payload: missing From/Body');
+    throw new Error('Unsupported inbound webhook: expected Telnyx JSON or Twilio form payload');
   }
 
-  return { from, to, body, provider: 'twilio' };
+  return { from, to, body, provider: 'telnyx' };
 }
 
 /**
