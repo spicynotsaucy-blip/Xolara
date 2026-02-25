@@ -7,6 +7,7 @@ import {
   updateLeadStatus,
   hasAppointmentBooked,
 } from '@/lib/db';
+import { supabaseServer } from '@/lib/supabaseServer';
 
 // Initialize Groq client
 const groq = new Groq({
@@ -122,7 +123,7 @@ async function extractQualification(conversationHistory: Array<{ role: string; m
 }
 
 /**
- * Send SMS via Telnyx
+ * Send SMS via Telnyx using global credentials
  */
 async function sendSMS(to: string, text: string, from?: string) {
   const apiKey = process.env.TELNYX_API_KEY;
@@ -202,7 +203,7 @@ async function parseInboundSms(request: NextRequest): Promise<InboundSms> {
 }
 
 /**
- * Handle incoming SMS webhook
+ * Handle incoming SMS webhook with multi-tenant support
  */
 export async function POST(request: NextRequest) {
   try {
@@ -211,15 +212,45 @@ export async function POST(request: NextRequest) {
     // Normalize phone number
     const phoneNumber = inbound.from.trim();
     const messageBody = inbound.body.trim();
+    const toNumber = inbound.to?.trim();
 
-    // Get or create the lead
-    const lead = await getOrCreateLead(phoneNumber);
+    if (!toNumber) {
+      console.error('No "to" number found in webhook payload');
+      return NextResponse.json({ ok: false }, { status: 200 });
+    }
 
-    // Get conversation history
-    const conversationHistory = await getConversationHistory(phoneNumber);
+    // Look up agent by the 'to' number using phone_numbers pool table
+    const { data: phoneRecord } = await supabaseServer
+      .from('phone_numbers')
+      .select('agent_id')
+      .eq('number', toNumber)
+      .single();
 
-    // Save the incoming lead message
-    await saveMessage(phoneNumber, 'lead', messageBody);
+    if (!phoneRecord?.agent_id) {
+      console.warn(`No agent found for phone number: ${toNumber}`);
+      return NextResponse.json({ ok: false }, { status: 200 });
+    }
+
+    // Get the agent details
+    const { data: agent } = await supabaseServer
+      .from('agents')
+      .select('*')
+      .eq('id', phoneRecord.agent_id)
+      .single();
+
+    if (!agent) {
+      console.warn(`Agent not found for ID: ${phoneRecord.agent_id}`);
+      return NextResponse.json({ ok: false }, { status: 200 });
+    }
+
+    // Get or create the lead for this specific agent
+    const lead = await getOrCreateLead(phoneNumber, agent.id);
+
+    // Get conversation history for this agent's lead
+    const conversationHistory = await getConversationHistory(phoneNumber, agent.id);
+
+    // Save the incoming lead message for this agent
+    await saveMessage(phoneNumber, agent.id, 'lead', messageBody);
 
     // Add the new message to history for context
     const fullHistory = [
@@ -230,10 +261,10 @@ export async function POST(request: NextRequest) {
     // Get AI response from Groq
     const aiResponse = await getAIResponse(fullHistory);
 
-    // Save the AI response
-    await saveMessage(phoneNumber, 'ai', aiResponse);
+    // Save the AI response for this agent
+    await saveMessage(phoneNumber, agent.id, 'ai', aiResponse);
 
-    // Send SMS immediately before doing anything else
+    // Send SMS using global Telnyx credentials
     await sendSMS(phoneNumber, aiResponse, inbound.to);
 
     // Fire qualification extraction in background - don't await it
@@ -253,7 +284,7 @@ export async function POST(request: NextRequest) {
             : lead.status === 'new'
               ? 'engaged'
               : lead.status;
-        await updateLeadStatus(phoneNumber, nextStatus as any, leadUpdates as any);
+        await updateLeadStatus(phoneNumber, agent.id, nextStatus as any, leadUpdates as any);
       })
       .catch(console.error);
 

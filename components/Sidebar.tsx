@@ -3,6 +3,9 @@
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { getCurrentAgent } from '@/lib/auth';
+import { Agent } from '@/types/database';
 
 const navItems = [
   { name: 'Dashboard', href: '/dashboard', icon: DashboardIcon },
@@ -13,6 +16,11 @@ const navItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [agent, setAgent] = useState<Agent | null>(null);
+
+  useEffect(() => {
+    getCurrentAgent().then(setAgent);
+  }, []);
 
   return (
     <motion.aside
@@ -74,18 +82,22 @@ export default function Sidebar() {
 
         {/* Bottom section */}
         <div className="mt-auto pt-4 border-t border-[#1E1E2E]">
-          <div className="flex items-center gap-3 px-3 py-3">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center">
-              <span className="text-white text-xs font-bold">A</span>
+          {agent && (
+            <div className="flex items-center gap-3 px-3 py-3">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center">
+                <span className="text-white text-xs font-bold">
+                  {agent.full_name?.charAt(0) || agent.email.charAt(0)}
+                </span>
+              </div>
+              <div className="hidden lg:block">
+                <p className="text-sm font-medium text-white">{agent.full_name || agent.email}</p>
+                <p className="text-xs text-gray-400">Online</p>
+              </div>
+              <div className="ml-auto hidden lg:block">
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              </div>
             </div>
-            <div className="hidden lg:block">
-              <p className="text-sm font-medium text-white">Agent</p>
-              <p className="text-xs text-gray-400">Online</p>
-            </div>
-            <div className="ml-auto hidden lg:block">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </motion.aside>

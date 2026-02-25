@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import Sidebar from '@/components/Sidebar';
 import { getAllLeads, getConversationHistory } from '@/lib/db';
+import { getCurrentAgent } from '@/lib/auth';
 import { Lead, Conversation } from '@/types/database';
 import { supabase } from '@/lib/supabase';
 
@@ -16,7 +18,9 @@ export default function ConversationsPage() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [agent, setAgent] = useState<any>(null);
   const selectedLeadRef = useRef<Lead | null>(null);
+  const router = useRouter();
 
   const handleSelectLead = (lead: Lead) => {
     selectedLeadRef.current = lead;
@@ -24,29 +28,54 @@ export default function ConversationsPage() {
   };
 
   useEffect(() => {
-    getAllLeads().then((data) => {
+    // Check authentication and get agent
+    getCurrentAgent().then((agentData) => {
+      if (!agentData) {
+        router.push('/login');
+        return;
+      }
+      setAgent(agentData);
+      fetchLeads(agentData.id);
+    });
+  }, []);
+
+  async function fetchLeads(agentId: string) {
+    try {
+      const data = await getAllLeads(agentId);
       setLeads(data);
       if (data.length > 0) handleSelectLead(data[0]);
+    } catch (error) {
+      console.error('Error fetching leads:', error);
+    } finally {
       setLoading(false);
-    });
+    }
+  }
+
+  useEffect(() => {
+    if (!agent) return;
 
     const channel = supabase
-      .channel('conversations-page')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
+      .channel(`conversations-${agent.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'conversations',
+        filter: `agent_id=eq.${agent.id}`,
+      }, () => {
         if (selectedLeadRef.current) {
-          getConversationHistory(selectedLeadRef.current.phone_number).then(setConversations);
+          getConversationHistory(selectedLeadRef.current.phone_number, agent.id).then(setConversations);
         }
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, []);
+  }, [agent]);
 
   useEffect(() => {
-    if (selectedLead) {
-      getConversationHistory(selectedLead.phone_number).then(setConversations);
+    if (selectedLead && agent) {
+      getConversationHistory(selectedLead.phone_number, agent.id).then(setConversations);
     }
-  }, [selectedLead]);
+  }, [selectedLead, agent]);
 
   return (
     <div className="min-h-screen bg-[#0A0A0F] flex">

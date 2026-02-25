@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import Sidebar from '@/components/Sidebar';
 import { getAllLeads } from '@/lib/db';
+import { getCurrentAgent } from '@/lib/auth';
 import { Lead } from '@/types/database';
 import { supabase } from '@/lib/supabase';
 
@@ -24,22 +26,49 @@ export default function LeadsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<string>('all');
+  const [agent, setAgent] = useState<any>(null);
+  const router = useRouter();
 
   useEffect(() => {
-    getAllLeads().then((data) => {
-      setLeads(data);
-      setLoading(false);
+    // Check authentication and get agent
+    getCurrentAgent().then((agentData) => {
+      if (!agentData) {
+        router.push('/login');
+        return;
+      }
+      setAgent(agentData);
+      fetchLeads(agentData.id);
     });
+  }, []);
+
+  async function fetchLeads(agentId: string) {
+    try {
+      const data = await getAllLeads(agentId);
+      setLeads(data);
+    } catch (error) {
+      console.error('Error fetching leads:', error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!agent) return;
 
     const channel = supabase
-      .channel('leads-page')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => {
-        getAllLeads().then(setLeads);
+      .channel(`leads-${agent.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'leads',
+        filter: `agent_id=eq.${agent.id}`,
+      }, () => {
+        fetchLeads(agent.id);
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, []);
+  }, [agent]);
 
   const filtered = leads.filter((lead) => {
     const matchesSearch = lead.phone_number.includes(search) ||

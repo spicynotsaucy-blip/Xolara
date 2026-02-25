@@ -1,74 +1,107 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import HeroStatsBar from '@/components/HeroStatsBar';
 import ConversationFeed from '@/components/ConversationFeed';
 import LeadPipeline from '@/components/LeadPipeline';
 import { supabase } from '@/lib/supabase';
+import { getCurrentAgent } from '@/lib/auth';
+import { getAllLeads, getAllConversations } from '@/lib/db';
 import { Lead } from '@/types/database';
 
 export default function Dashboard() {
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [agent, setAgent] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
-    // Fetch initial leads
-    fetchLeads();
+    // Check authentication and get agent
+    getCurrentAgent().then((agentData) => {
+      if (!agentData) {
+        router.push('/login');
+        return;
+      }
+      setAgent(agentData);
+      fetchData(agentData.id);
+    });
+  }, []);
+
+  async function fetchData(agentId: string) {
+    try {
+      const [leadsData, conversationsData] = await Promise.all([
+        getAllLeads(agentId),
+        getAllConversations(agentId)
+      ]);
+      
+      setLeads(leadsData);
+      setConversations(conversationsData);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!agent) return;
 
     // Subscribe to real-time lead updates
-    const subscription = supabase
-      .channel('leads')
+    const leadSubscription = supabase
+      .channel(`leads-${agent.id}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'leads',
+          filter: `agent_id=eq.${agent.id}`,
         },
         () => {
-          fetchLeads();
+          fetchData(agent.id);
+        }
+      )
+      .subscribe();
+
+    // Subscribe to real-time conversation updates
+    const conversationSubscription = supabase
+      .channel(`conversations-${agent.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'conversations',
+          filter: `agent_id=eq.${agent.id}`,
+        },
+        () => {
+          fetchData(agent.id);
         }
       )
       .subscribe();
 
     return () => {
-      subscription.unsubscribe();
+      leadSubscription.unsubscribe();
+      conversationSubscription.unsubscribe();
     };
-  }, []);
-
-  async function fetchLeads() {
-    try {
-      const { data, error } = await supabase
-        .from('leads')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Error fetching leads:', error);
-        return;
-      }
-
-      setLeads(data || []);
-    } catch (error) {
-      console.error('Error:', error);
-    } finally {
-      setLoading(false);
-    }
-  }
+  }, [agent]);
 
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0A0A0F] flex items-center justify-center">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 border-2 border-[#6366F1] border-t-transparent rounded-full animate-spin" />
-          <span className="text-gray-400">Loading...</span>
-        </div>
+        <div className="text-white">Loading...</div>
       </div>
     );
   }
 
-  return (
+  if (!agent) {
+    return null; // Will redirect
+  }
+
+      return (
     <div className="min-h-screen bg-[#0A0A0F] flex">
       <Sidebar />
 
