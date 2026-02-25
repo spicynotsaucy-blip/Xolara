@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Sidebar from '@/components/Sidebar';
 import { getAllLeads, getConversationHistory } from '@/lib/db';
@@ -16,19 +16,25 @@ export default function ConversationsPage() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const selectedLeadRef = useRef<Lead | null>(null);
+
+  const handleSelectLead = (lead: Lead) => {
+    selectedLeadRef.current = lead;
+    setSelectedLead(lead);
+  };
 
   useEffect(() => {
     getAllLeads().then((data) => {
       setLeads(data);
-      if (data.length > 0) setSelectedLead(data[0]);
+      if (data.length > 0) handleSelectLead(data[0]);
       setLoading(false);
     });
 
     const channel = supabase
       .channel('conversations-page')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
-        if (selectedLead) {
-          getConversationHistory(selectedLead.phone_number).then(setConversations);
+        if (selectedLeadRef.current) {
+          getConversationHistory(selectedLeadRef.current.phone_number).then(setConversations);
         }
       })
       .subscribe();
@@ -64,7 +70,7 @@ export default function ConversationsPage() {
                 <motion.div
                   key={lead.id}
                   whileHover={{ backgroundColor: 'rgba(99,102,241,0.05)' }}
-                  onClick={() => setSelectedLead(lead)}
+                  onClick={() => handleSelectLead(lead)}
                   className={`p-4 cursor-pointer border-b border-[#1E1E2E] transition-all ${
                     selectedLead?.id === lead.id ? 'bg-[#6366F1]/10 border-l-2 border-l-[#6366F1]' : ''
                   }`}
