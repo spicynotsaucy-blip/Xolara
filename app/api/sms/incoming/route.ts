@@ -221,28 +221,29 @@ export async function POST(request: NextRequest) {
     // Save the AI response
     await saveMessage(phoneNumber, 'ai', aiResponse);
 
-    const qualification = await extractQualification([...fullHistory, { role: 'ai', message: aiResponse }]);
-    const leadUpdates: Record<string, string | null> = {
-      budget: lead.budget ?? qualification.budget,
-      timeline: lead.timeline ?? qualification.timeline,
-      area: lead.area ?? qualification.area,
-    };
-
-    const hasAllQualification = Boolean(leadUpdates.timeline && leadUpdates.budget && leadUpdates.area);
-    const isAppointed = hasAppointmentBooked(aiResponse);
-    const nextStatus = isAppointed
-      ? 'appointed'
-      : hasAllQualification
-        ? 'qualified'
-        : lead.status === 'new'
-          ? 'engaged'
-          : lead.status;
-
-    // Check if appointment was booked and update status
-    await updateLeadStatus(phoneNumber, nextStatus as any, leadUpdates as any);
-
-    // Send the AI response back via Twilio SMS
+    // Send SMS immediately before doing anything else
     await sendSMS(phoneNumber, aiResponse, inbound.to);
+
+    // Fire qualification extraction in background - don't await it
+    extractQualification([...fullHistory, { role: 'ai', message: aiResponse }])
+      .then(async (qualification) => {
+        const leadUpdates = {
+          budget: lead.budget ?? qualification.budget,
+          timeline: lead.timeline ?? qualification.timeline,
+          area: lead.area ?? qualification.area,
+        };
+        const hasAllQualification = Boolean(leadUpdates.timeline && leadUpdates.budget && leadUpdates.area);
+        const isAppointed = hasAppointmentBooked(aiResponse);
+        const nextStatus = isAppointed
+          ? 'appointed'
+          : hasAllQualification
+            ? 'qualified'
+            : lead.status === 'new'
+              ? 'engaged'
+              : lead.status;
+        await updateLeadStatus(phoneNumber, nextStatus as any, leadUpdates as any);
+      })
+      .catch(console.error);
 
     // Telnyx expects a fast 2xx response; no TwiML.
     return NextResponse.json({ ok: true });
