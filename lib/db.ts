@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { supabaseServer } from '@/lib/supabaseServer';
+import { createClient } from '@supabase/supabase-js';
 import { Lead, Conversation, LeadStatus } from '@/types/database';
 
 /**
@@ -147,6 +147,12 @@ export async function getAllConversations(agentId: string): Promise<Conversation
  * Picks the first unassigned number from the pool
  */
 export async function assignPhoneNumber(agentId: string): Promise<string | null> {
+  // Create Supabase client inside the function to avoid build-time initialization
+  const supabaseServer = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
   // Find first available number (no agent assigned)
   const { data: available, error: findError } = await supabaseServer
     .from('phone_numbers')

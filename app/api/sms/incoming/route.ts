@@ -7,7 +7,7 @@ import {
   updateLeadStatus,
   hasAppointmentBooked,
 } from '@/lib/db';
-import { supabaseServer } from '@/lib/supabaseServer';
+import { createClient } from '@supabase/supabase-js';
 
 // Initialize Groq client
 const groq = new Groq({
@@ -207,6 +207,12 @@ async function parseInboundSms(request: NextRequest): Promise<InboundSms> {
  */
 export async function POST(request: NextRequest) {
   try {
+    // Create Supabase client inside the function to avoid build-time initialization
+    const supabaseServer = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
     const inbound = await parseInboundSms(request);
 
     // Normalize phone number

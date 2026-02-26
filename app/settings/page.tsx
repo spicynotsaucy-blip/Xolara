@@ -10,9 +10,6 @@ import { Agent } from '@/types/database';
 export default function SettingsPage() {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [fullName, setFullName] = useState('');
-  const [telnyxApiKey, setTelnyxApiKey] = useState('');
-  const [telnyxNumber, setTelnyxNumber] = useState('');
-  const [showApiKey, setShowApiKey] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState<'success' | 'error'>('success');
@@ -22,8 +19,6 @@ export default function SettingsPage() {
       if (agentData) {
         setAgent(agentData);
         setFullName(agentData.full_name || '');
-        setTelnyxApiKey(agentData.telnyx_api_key || '');
-        setTelnyxNumber(agentData.telnyx_number || '');
       }
     });
   }, []);
@@ -50,30 +45,6 @@ export default function SettingsPage() {
       showToast('Profile updated successfully', 'success');
     } catch (err: any) {
       showToast(err.message || 'Failed to update profile', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const updateTelnyx = async () => {
-    if (!agent) return;
-
-    setLoading(true);
-    try {
-      const { error } = await supabase
-        .from('agents')
-        .update({
-          telnyx_api_key: telnyxApiKey,
-          telnyx_number: telnyxNumber,
-        })
-        .eq('id', agent.id);
-
-      if (error) throw error;
-
-      setAgent({ ...agent, telnyx_api_key: telnyxApiKey, telnyx_number: telnyxNumber });
-      showToast('Telnyx configuration updated', 'success');
-    } catch (err: any) {
-      showToast(err.message || 'Failed to update Telnyx configuration', 'error');
     } finally {
       setLoading(false);
     }

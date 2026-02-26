@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabaseServer';
+import { createClient } from '@supabase/supabase-js';
 
 export async function POST(request: NextRequest) {
   try {
+    // Create Supabase client inside the function to avoid build-time initialization
+    const supabaseServer = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
     const { numbers, adminKey } = await request.json();
 
     // Validate admin key
